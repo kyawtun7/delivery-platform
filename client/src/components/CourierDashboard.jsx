@@ -5,7 +5,7 @@ export default function CourierDashboard({ user }) {
   const [available, setAvailable] = useState([]);
   const [myJobs, setMyJobs] = useState([]);
   const [earnings, setEarnings] = useState(null);
-  const [proofFile, setProofFile] = useState(null);
+  const [proofDataUrl, setProofDataUrl] = useState(null);
   const [withdrawTHB, setWithdrawTHB] = useState('');
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(false);
@@ -54,21 +54,32 @@ export default function CourierDashboard({ user }) {
     }
   };
 
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) {
+      setProofDataUrl(null);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setProofDataUrl(reader.result); // full data URL
+    };
+    reader.readAsDataURL(file);
+  };
+
   const deliverWithProof = async (id) => {
-    if (!proofFile) {
+    if (!proofDataUrl) {
       alert('Please choose a proof image first.');
       return;
     }
     try {
       setLoading(true);
       setMsg('');
-      const formData = new FormData();
-      formData.append('proof', proofFile);
-      const res = await api.post(`/courier/jobs/${id}/deliver`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+      const res = await api.post(`/courier/jobs/${id}/deliver`, {
+        proofDataUrl
       });
       setMsg(res.data.message || 'Successfully delivered');
-      setProofFile(null);
+      setProofDataUrl(null);
       await loadAll();
     } catch (err) {
       console.error(err);
@@ -100,6 +111,13 @@ export default function CourierDashboard({ user }) {
   };
 
   const balanceTHB = earnings?.balanceTHB ?? 0;
+
+  const resolveProofSrc = (value) => {
+    if (!value) return null;
+    if (value.startsWith('data:')) return value;      // new base64 format
+    if (value.startsWith('http')) return value;       // full URL
+    return `${API_BASE}${value}`;                     // old /uploads/ path
+  };
 
   return (
     <div className="layout-two-col" style={{ width: '100%', maxWidth: 1080 }}>
@@ -189,100 +207,103 @@ export default function CourierDashboard({ user }) {
         )}
 
         <div className="list">
-          {myJobs.map((job) => (
-            <div className="list-item" key={job.id}>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  marginBottom: 4
-                }}
-              >
-                <span style={{ fontWeight: 600 }}>#{job.id}</span>
-                <span className="status">{job.status}</span>
-              </div>
-              <div style={{ fontSize: 12, opacity: 0.8 }}>
-                {job.pickup_city} → {job.drop_city}
-              </div>
-              <div style={{ fontSize: 12, opacity: 0.8 }}>
-                Contact: {job.contact_phone}
-              </div>
-
-              {/* 3-step flow */}
-              {job.status !== 'delivered' && (
+          {myJobs.map((job) => {
+            const proofSrc = resolveProofSrc(job.proof_of_delivery);
+            return (
+              <div className="list-item" key={job.id}>
                 <div
                   style={{
-                    marginTop: 6,
                     display: 'flex',
-                    flexWrap: 'wrap',
-                    gap: 6
+                    justifyContent: 'space-between',
+                    marginBottom: 4
                   }}
                 >
-                  {job.status === 'accepted' && (
-                    <button
-                      className="btn secondary"
-                      disabled={loading}
-                      onClick={() => updateStatus(job.id, 'picked_up')}
-                      style={{ fontSize: 11, padding: '4px 10px' }}
-                    >
-                      Pick up
-                    </button>
-                  )}
+                  <span style={{ fontWeight: 600 }}>#{job.id}</span>
+                  <span className="status">{job.status}</span>
+                </div>
+                <div style={{ fontSize: 12, opacity: 0.8 }}>
+                  {job.pickup_city} → {job.drop_city}
+                </div>
+                <div style={{ fontSize: 12, opacity: 0.8 }}>
+                  Contact: {job.contact_phone}
+                </div>
 
-                  {job.status === 'picked_up' && (
-                    <button
-                      className="btn secondary"
-                      disabled={loading}
-                      onClick={() => updateStatus(job.id, 'in_transit')}
-                      style={{ fontSize: 11, padding: '4px 10px' }}
-                    >
-                      In transit
-                    </button>
-                  )}
-
-                  {job.status === 'in_transit' && (
-                    <>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) => setProofFile(e.target.files[0])}
-                        style={{ fontSize: 11 }}
-                      />
+                {/* 3-step flow */}
+                {job.status !== 'delivered' && (
+                  <div
+                    style={{
+                      marginTop: 6,
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: 6
+                    }}
+                  >
+                    {job.status === 'accepted' && (
                       <button
-                        className="btn"
+                        className="btn secondary"
                         disabled={loading}
-                        onClick={() => deliverWithProof(job.id)}
+                        onClick={() => updateStatus(job.id, 'picked_up')}
                         style={{ fontSize: 11, padding: '4px 10px' }}
                       >
-                        Delivered + proof
+                        Pick up
                       </button>
-                    </>
-                  )}
-                </div>
-              )}
+                    )}
 
-              {/* Proof display when delivered */}
-              {job.status === 'delivered' && job.proof_of_delivery && (
-                <div style={{ marginTop: 8 }}>
-                  <div style={{ fontSize: 11, opacity: 0.7 }}>
-                    Proof of delivery
+                    {job.status === 'picked_up' && (
+                      <button
+                        className="btn secondary"
+                        disabled={loading}
+                        onClick={() => updateStatus(job.id, 'in_transit')}
+                        style={{ fontSize: 11, padding: '4px 10px' }}
+                      >
+                        In transit
+                      </button>
+                    )}
+
+                    {job.status === 'in_transit' && (
+                      <>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleFileChange}
+                          style={{ fontSize: 11 }}
+                        />
+                        <button
+                          className="btn"
+                          disabled={loading}
+                          onClick={() => deliverWithProof(job.id)}
+                          style={{ fontSize: 11, padding: '4px 10px' }}
+                        >
+                          Delivered + proof
+                        </button>
+                      </>
+                    )}
                   </div>
-                  <img
-                    src={`${API_BASE}${job.proof_of_delivery}`}
-                    alt="Proof of delivery"
-                    style={{
-                      width: 64,
-                      height: 64,
-                      borderRadius: 8,
-                      objectFit: 'cover',
-                      border: '1px solid rgba(148,163,184,0.6)',
-                      marginTop: 4
-                    }}
-                  />
-                </div>
-              )}
-            </div>
-          ))}
+                )}
+
+                {/* Proof display when delivered */}
+                {job.status === 'delivered' && proofSrc && (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ fontSize: 11, opacity: 0.7 }}>
+                      Proof of delivery
+                    </div>
+                    <img
+                      src={proofSrc}
+                      alt="Proof of delivery"
+                      style={{
+                        width: 64,
+                        height: 64,
+                        borderRadius: 8,
+                        objectFit: 'cover',
+                        border: '1px solid rgba(148,163,184,0.6)',
+                        marginTop: 4
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
 
           {myJobs.length === 0 && (
             <p style={{ fontSize: 13, opacity: 0.8 }}>
