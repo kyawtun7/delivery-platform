@@ -1,15 +1,29 @@
 const express = require('express');
 const pool = require('../db');
 const { authMiddleware, roleMiddleware } = require('../middleware/auth');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 
 const router = express.Router();
 router.use(authMiddleware, roleMiddleware('courier'));
 
 const USD_TO_THB = 35;
 
-// ----------------------
-// GET available jobs
-// ----------------------
+// ---- Multer config for proof images ----
+const uploadDir = path.join(__dirname, '..', 'uploads');
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+
+const storage = multer.diskStorage({
+  destination: (_, __, cb) => cb(null, uploadDir),
+  filename: (_, file, cb) => {
+    const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, unique + path.extname(file.originalname));
+  }
+});
+const upload = multer({ storage });
+
+// ---- GET available jobs (paid only) ----
 router.get('/jobs/available', async (req, res) => {
   try {
     const [rows] = await pool.query(
@@ -28,9 +42,7 @@ router.get('/jobs/available', async (req, res) => {
   }
 });
 
-// ----------------------
-// Accept job
-// ----------------------
+// ---- Accept job ----
 router.post('/jobs/:id/accept', async (req, res) => {
   const deliveryId = req.params.id;
   const courierId = req.user.id;
@@ -62,9 +74,10 @@ router.post('/jobs/:id/accept', async (req, res) => {
     );
 
     const earnedUSD = Number((job.price * 0.8).toFixed(2));
+
     await conn.query(
       `INSERT INTO courier_earnings (courier_id, delivery_id, amount, type)
-       VALUES (?, ?, ?, 'delivery')`,
+       VALUES (?,?,?, 'delivery')`,
       [courierId, deliveryId, earnedUSD]
     );
 
@@ -84,9 +97,8 @@ router.post('/jobs/:id/accept', async (req, res) => {
   }
 });
 
-// ----------------------
-// Update status (pick up / in transit)
-// ----------------------
+// ---- Update status (Pick up / In transit) ----
+// PATCH /api/courier/jobs/:id/status  { status: 'picked_up' | 'in_transit' }
 router.patch('/jobs/:id/status', async (req, res) => {
   try {
     const deliveryId = req.params.id;
@@ -116,46 +128,48 @@ router.patch('/jobs/:id/status', async (req, res) => {
   }
 });
 
-// ----------------------
-// Delivered + proof (BASE64 stored in DB)
-// body: { proofDataUrl: "data:image/png;base64,..." }
-// ----------------------
-router.post('/jobs/:id/deliver', async (req, res) => {
-  try {
-    const deliveryId = req.params.id;
-    const { proofDataUrl } = req.body;
+// ---- Delivered + proof image ----
+// POST /api/courier/jobs/:id/deliver (multipart: status=delivered, proof=<file>)
+router.post(
+  '/jobs/:id/deliver',
+  upload.single('proof'),
+  async (req, res) => {
+    try {
+      const deliveryId = req.params.id;
 
-    const [rows] = await pool.query(
-      'SELECT * FROM deliveries WHERE id = ? AND courier_id = ?',
-      [deliveryId, req.user.id]
-    );
-    if (rows.length === 0) {
-      return res
-        .status(404)
-        .json({ message: 'Job not found for this courier' });
+      const [rows] = await pool.query(
+        'SELECT * FROM deliveries WHERE id = ? AND courier_id = ?',
+        [deliveryId, req.user.id]
+      );
+      if (rows.length === 0) {
+        return res
+          .status(404)
+          .json({ message: 'Job not found for this courier' });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({ message: 'Proof image required' });
+      }
+
+      const proofURL = `/uploads/${req.file.filename}`;
+
+      await pool.query(
+        'UPDATE deliveries SET status = "delivered", proof_of_delivery = ? WHERE id = ?',
+        [proofURL, deliveryId]
+      );
+
+      res.json({
+        message: 'Successfully delivered',
+        proofURL
+      });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: 'Failed to mark delivered' });
     }
-
-    if (!proofDataUrl || typeof proofDataUrl !== 'string' || !proofDataUrl.startsWith('data:')) {
-      return res.status(400).json({ message: 'Proof image (base64) required' });
-    }
-
-    await pool.query(
-      'UPDATE deliveries SET status = "delivered", proof_of_delivery = ? WHERE id = ?',
-      [proofDataUrl, deliveryId]
-    );
-
-    res.json({
-      message: 'Successfully delivered'
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Failed to mark delivered' });
   }
-});
+);
 
-// ----------------------
-// My jobs
-// ----------------------
+// ---- My jobs ----
 router.get('/jobs/my', async (req, res) => {
   try {
     const [rows] = await pool.query(
@@ -169,9 +183,7 @@ router.get('/jobs/my', async (req, res) => {
   }
 });
 
-// ----------------------
-// Earnings
-// ----------------------
+// ---- Earnings (USD + THB) ----
 router.get('/earnings', async (req, res) => {
   try {
     const courierId = req.user.id;
@@ -202,10 +214,8 @@ router.get('/earnings', async (req, res) => {
   }
 });
 
-// ----------------------
-// Withdraw in THB
-// body: { amountTHB }
-// ----------------------
+// ---- Withdraw any THB amount ----
+// body: { amountTHB: number }
 router.post('/withdraw', async (req, res) => {
   try {
     const courierId = req.user.id;
@@ -215,6 +225,7 @@ router.post('/withdraw', async (req, res) => {
       return res.status(400).json({ message: 'Invalid withdraw amount' });
     }
 
+    // Calculate USD balances
     const [rows] = await pool.query(
       'SELECT type, amount FROM courier_earnings WHERE courier_id = ?',
       [courierId]

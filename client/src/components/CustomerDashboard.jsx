@@ -4,14 +4,6 @@ import { api, API_BASE } from '../api';
 const CITIES = ['Tokyo', 'Osaka', 'Nagoya'];
 const USD_TO_THB = 35;
 
-// helper to support both base64 and old /uploads paths
-const resolveProofSrc = (value) => {
-  if (!value) return null;
-  if (value.startsWith('data:')) return value;   // new base64 format
-  if (value.startsWith('http')) return value;    // full URL
-  return `${API_BASE}${value}`;                  // old /uploads/... path
-};
-
 export default function CustomerDashboard({ user }) {
   const [form, setForm] = useState({
     recipient_name: '',
@@ -77,7 +69,7 @@ export default function CustomerDashboard({ user }) {
       const res = await api.post('/customer/deliveries', form);
       const deliveryId = res.data.id;
 
-      // Demo: auto-payment
+      // demo auto-pay
       await api.post(`/customer/deliveries/${deliveryId}/pay`);
 
       setMessage(
@@ -101,7 +93,7 @@ export default function CustomerDashboard({ user }) {
 
   return (
     <div className="layout-two-col" style={{ width: '100%', maxWidth: 1080 }}>
-      {/* LEFT: create request */}
+      {/* Create request */}
       <div className="card">
         <div className="badge">Customer Dashboard</div>
         <h2 style={{ marginTop: 10 }}>Create delivery request</h2>
@@ -202,68 +194,57 @@ export default function CustomerDashboard({ user }) {
         </form>
       </div>
 
-      {/* RIGHT: track deliveries */}
+      {/* Track deliveries */}
       <div className="card">
         <div className="badge">Track deliveries</div>
         <h3 style={{ marginTop: 10 }}>Your recent orders</h3>
         <div className="list">
-          {deliveries.map((d) => {
-            const proofSrc = resolveProofSrc(d.proof_of_delivery);
-            return (
-              <div key={d.id} className="list-item">
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    marginBottom: 4
-                  }}
-                >
-                  <span style={{ fontWeight: 600 }}>#{d.id}</span>
-                  <span className="status">{d.status}</span>
-                </div>
-                <div style={{ fontSize: 12, opacity: 0.8 }}>
-                  To: {d.recipient_name}
-                </div>
-                <div style={{ fontSize: 12, opacity: 0.8 }}>
-                  {d.pickup_city} → {d.drop_city}
-                </div>
-                <div style={{ fontSize: 12, marginTop: 4 }}>
-                  Price:{' '}
-                  <strong>
-                    {Math.round(d.price * USD_TO_THB)} THB
-                  </strong>{' '}
-                  · Payment: {d.payment_status}
-                </div>
-
-                {proofSrc && (
-                  <div
-                    style={{
-                      marginTop: 6,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 4
-                    }}
-                  >
-                    <div style={{ fontSize: 11, opacity: 0.7 }}>
-                      Proof of delivery:
-                    </div>
-                    <img
-                      src={proofSrc}
-                      alt="Proof of delivery"
-                      style={{
-                        width: 64,
-                        height: 64,
-                        borderRadius: 8,
-                        objectFit: 'cover',
-                        border: '1px solid rgba(148,163,184,0.6)'
-                      }}
-                    />
-                  </div>
-                )}
+          {deliveries.map((d) => (
+            <div key={d.id} className="list-item">
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  marginBottom: 4
+                }}
+              >
+                <span style={{ fontWeight: 600 }}>#{d.id}</span>
+                <span className="status">{d.status}</span>
               </div>
-            );
-          })}
+              <div style={{ fontSize: 12, opacity: 0.8 }}>
+                To: {d.recipient_name}
+              </div>
+              <div style={{ fontSize: 12, opacity: 0.8 }}>
+                {d.pickup_city} → {d.drop_city}
+              </div>
+              <div style={{ fontSize: 12, marginTop: 4 }}>
+                Price:{' '}
+                <strong>
+                  {Math.round(d.price * USD_TO_THB)} THB
+                </strong>{' '}
+                · Payment: {d.payment_status}
+              </div>
 
+              {d.proof_of_delivery && (
+                <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ fontSize: 11, opacity: 0.7 }}>
+                    Proof of delivery:
+                  </div>
+                  <img
+                    src={`${API_BASE}${d.proof_of_delivery}`}
+                    alt="Proof of delivery"
+                    style={{
+                      width: 64,
+                      height: 64,
+                      borderRadius: 8,
+                      objectFit: 'cover',
+                      border: '1px solid rgba(148,163,184,0.6)'
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          ))}
           {deliveries.length === 0 && (
             <p style={{ fontSize: 13, opacity: 0.8 }}>
               You don&apos;t have any deliveries yet.
