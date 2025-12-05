@@ -1,27 +1,11 @@
 const express = require('express');
 const pool = require('../db');
 const { authMiddleware, roleMiddleware } = require('../middleware/auth');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 
 const router = express.Router();
 router.use(authMiddleware, roleMiddleware('courier'));
 
 const USD_TO_THB = 35;
-
-// ---- Multer config for proof images ----
-const uploadDir = path.join(__dirname, '..', 'uploads');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
-
-const storage = multer.diskStorage({
-  destination: (_, __, cb) => cb(null, uploadDir),
-  filename: (_, file, cb) => {
-    const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, unique + path.extname(file.originalname));
-  }
-});
-const upload = multer({ storage });
 
 // ---- GET available jobs (paid only) ----
 router.get('/jobs/available', async (req, res) => {
@@ -128,46 +112,42 @@ router.patch('/jobs/:id/status', async (req, res) => {
   }
 });
 
-// ---- Delivered + proof image ----
-// POST /api/courier/jobs/:id/deliver (multipart: status=delivered, proof=<file>)
-router.post(
-  '/jobs/:id/deliver',
-  upload.single('proof'),
-  async (req, res) => {
-    try {
-      const deliveryId = req.params.id;
+// ---- Delivered + proof image (base64, no files) ----
+// POST /api/courier/jobs/:id/deliver  { proofBase64: "data:image/png;base64,..." }
+router.post('/jobs/:id/deliver', async (req, res) => {
+  try {
+    const deliveryId = req.params.id;
+    const { proofBase64 } = req.body;
 
-      const [rows] = await pool.query(
-        'SELECT * FROM deliveries WHERE id = ? AND courier_id = ?',
-        [deliveryId, req.user.id]
-      );
-      if (rows.length === 0) {
-        return res
-          .status(404)
-          .json({ message: 'Job not found for this courier' });
-      }
-
-      if (!req.file) {
-        return res.status(400).json({ message: 'Proof image required' });
-      }
-
-      const proofURL = `/uploads/${req.file.filename}`;
-
-      await pool.query(
-        'UPDATE deliveries SET status = "delivered", proof_of_delivery = ? WHERE id = ?',
-        [proofURL, deliveryId]
-      );
-
-      res.json({
-        message: 'Successfully delivered',
-        proofURL
-      });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ message: 'Failed to mark delivered' });
+    const [rows] = await pool.query(
+      'SELECT * FROM deliveries WHERE id = ? AND courier_id = ?',
+      [deliveryId, req.user.id]
+    );
+    if (rows.length === 0) {
+      return res
+        .status(404)
+        .json({ message: 'Job not found for this courier' });
     }
+
+    if (!proofBase64 || typeof proofBase64 !== 'string') {
+      return res.status(400).json({ message: 'Proof image required' });
+    }
+
+    // store the base64 string directly in DB
+    await pool.query(
+      'UPDATE deliveries SET status = "delivered", proof_of_delivery = ? WHERE id = ?',
+      [proofBase64, deliveryId]
+    );
+
+    res.json({
+      message: 'Successfully delivered',
+      proof: proofBase64
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Failed to mark delivered' });
   }
-);
+});
 
 // ---- My jobs ----
 router.get('/jobs/my', async (req, res) => {
@@ -225,7 +205,6 @@ router.post('/withdraw', async (req, res) => {
       return res.status(400).json({ message: 'Invalid withdraw amount' });
     }
 
-    // Calculate USD balances
     const [rows] = await pool.query(
       'SELECT type, amount FROM courier_earnings WHERE courier_id = ?',
       [courierId]

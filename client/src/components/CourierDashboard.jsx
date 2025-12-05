@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { api, API_BASE } from '../api';
+import { api } from '../api';
 
 export default function CourierDashboard({ user }) {
   const [available, setAvailable] = useState([]);
   const [myJobs, setMyJobs] = useState([]);
   const [earnings, setEarnings] = useState(null);
-  const [proofFile, setProofFile] = useState(null);
+  const [proofFile, setProofFile] = useState(null); // will store base64 string
   const [withdrawTHB, setWithdrawTHB] = useState('');
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(false);
@@ -54,6 +54,19 @@ export default function CourierDashboard({ user }) {
     }
   };
 
+  // convert chosen file to base64 and store it
+  const handleProofChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      // result is data URL: "data:image/png;base64,...."
+      setProofFile(reader.result);
+    };
+    reader.readAsDataURL(file);
+  };
+
   const deliverWithProof = async (id) => {
     if (!proofFile) {
       alert('Please choose a proof image first.');
@@ -62,10 +75,8 @@ export default function CourierDashboard({ user }) {
     try {
       setLoading(true);
       setMsg('');
-      const formData = new FormData();
-      formData.append('proof', proofFile);
-      const res = await api.post(`/courier/jobs/${id}/deliver`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+      const res = await api.post(`/courier/jobs/${id}/deliver`, {
+        proofBase64: proofFile
       });
       setMsg(res.data.message || 'Successfully delivered');
       setProofFile(null);
@@ -129,9 +140,7 @@ export default function CourierDashboard({ user }) {
               </div>
               <div style={{ fontSize: 12, marginTop: 4 }}>
                 Payout:{' '}
-                <strong>
-                  {Math.round(job.price * 0.8 * 35)} THB
-                </strong>
+                <strong>{Math.round(job.price * 0.8 * 35)} THB</strong>
               </div>
               {job.status === 'pending' && (
                 <button
@@ -245,7 +254,7 @@ export default function CourierDashboard({ user }) {
                       <input
                         type="file"
                         accept="image/*"
-                        onChange={(e) => setProofFile(e.target.files[0])}
+                        onChange={handleProofChange}
                         style={{ fontSize: 11 }}
                       />
                       <button
@@ -268,7 +277,7 @@ export default function CourierDashboard({ user }) {
                     Proof of delivery
                   </div>
                   <img
-                    src={`${API_BASE}${job.proof_of_delivery}`}
+                    src={job.proof_of_delivery}
                     alt="Proof of delivery"
                     style={{
                       width: 64,
